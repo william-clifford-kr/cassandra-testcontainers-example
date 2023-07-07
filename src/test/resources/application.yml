@@ -1,0 +1,51 @@
+spring:
+  # For Spring Boot 3.x with spring-data-cassandra:4.0.7, use the following block.
+  cassandra:
+    contact-points: ${CASSANDRA_CONTACT_POINTS}
+    keyspace-name: ${CASSANDRA_KEYSPACE_NAME}
+    local-datacenter: datacenter1
+    port: ${CASSANDRA_PORT}
+    schema-action: create_if_not_exists
+  # For Spring Boot 2.7.x with spring-data-cassandra:3.4.13 , use the following block.
+  data:
+    cassandra:
+      contact-points: ${CASSANDRA_CONTACT_POINTS}
+      keyspace-name: ${CASSANDRA_KEYSPACE_NAME}
+      local-datacenter: datacenter1
+      port: ${CASSANDRA_PORT}
+      schema-action: create_if_not_exists
+
+management:
+  endpoint:
+    health:
+      enabled: true
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    cassandra:
+      enabled: true
+    cassandra-health-check:
+      enabled: false
+    db:
+      enabled: true
+    livenessstate:
+      enabled: true
+    random:
+      enabled: false
+    readinessstate:
+      enabled: true
+  info:
+    build:
+      enabled: true
+    defaults:
+      enabled: true
+    env:
+      enabled: false
+    git:
+      enabled: true
+      mode: full
+    java:
+      enabled: true
+    os:
+      enabled: true
