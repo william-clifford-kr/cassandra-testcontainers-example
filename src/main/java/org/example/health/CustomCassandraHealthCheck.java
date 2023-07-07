@@ -14,11 +14,16 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.*;
 
+/**
+ * Custom {@link HealthIndicator} for reporting on Cassandra connection status.
+ * The spring-data-cassandra library adds a simple health indicator which shows
+ * little more than up/down status. Here, we add some custom details that we
+ * extract from the autoconfigured session.
+ */
 @Component("cassandra-health-check")
 @ConditionalOnEnabledHealthIndicator("cassandra-health-check")
 public class CustomCassandraHealthCheck implements HealthIndicator {
 
-  //    private final Cluster cluster;
   private final CqlSession cqlSession;
   private final Session session;
 

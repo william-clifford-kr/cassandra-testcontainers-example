@@ -7,6 +7,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * Sample custom {@link HealthIndicator} which includes additional details and
+ * can be enabled and disabled via the application properties.
+ */
 @Component
 @ConditionalOnEnabledHealthIndicator("random")
 public class RandomHealthIndicator implements HealthIndicator {
