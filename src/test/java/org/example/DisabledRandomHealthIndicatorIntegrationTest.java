@@ -13,17 +13,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
-        "management.health.random.enabled=false"
+  "management.health.random.enabled=false"
 })
 class DisabledRandomHealthIndicatorIntegrationTest extends CassandraSimpleIntegrationTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+  @Autowired
+  private MockMvc mockMvc;
 
-    @Test
-    void givenDisabledIndicator_whenSendingRequest_thenReturns404() throws Exception {
-        mockMvc.perform(get("/actuator/health/random"))
-                .andExpect(status().isNotFound());
-    }
+  @Test
+  void givenDisabledIndicator_whenSendingRequest_thenReturns404() throws Exception {
+    mockMvc.perform(get("/actuator/health/random"))
+      .andExpect(status().isNotFound());
+  }
 
 }

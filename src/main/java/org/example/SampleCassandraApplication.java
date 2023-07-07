@@ -6,12 +6,12 @@ import org.springframework.data.cassandra.repository.config.EnableCassandraRepos
 
 @SpringBootApplication
 @EnableCassandraRepositories(basePackages = {
-        "org.example.dao"
+  "org.example.dao"
 })
 public class SampleCassandraApplication {
 
-    public static void main(final String[] args) {
-        SpringApplication.run(SampleCassandraApplication.class, args);
-    }
+  public static void main(final String[] args) {
+    SpringApplication.run(SampleCassandraApplication.class, args);
+  }
 
 }
