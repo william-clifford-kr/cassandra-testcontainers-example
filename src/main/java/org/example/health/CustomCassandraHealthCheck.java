@@ -1,139 +1,178 @@
 package org.example.health;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.context.DriverContext;
+import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
-import com.datastax.oss.driver.api.core.session.Session;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.autoconfigure.health.ConditionalOnEnabledHealthIndicator;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.boot.autoconfigure.cassandra.CassandraProperties;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.Nonnull;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
+/**
+ * Custom {@link HealthIndicator} for reporting on Cassandra connection status.
+ * The spring-data-cassandra library adds a simple health indicator which shows
+ * little more than up/down status. Here, we add some custom details that we
+ * extract from the autoconfigured session.
+ */
 @Component("cassandra-health-check")
 @ConditionalOnEnabledHealthIndicator("cassandra-health-check")
 public class CustomCassandraHealthCheck implements HealthIndicator {
 
-    //    private final Cluster cluster;
-    private final CqlSession cqlSession;
-    private final Session session;
+  private static final Logger LOGGER = LoggerFactory.getLogger(CustomCassandraHealthCheck.class);
 
-    @Autowired
-    CustomCassandraHealthCheck(
-            final CqlSession cqlSession,
-            final Session session
-    ) {
-//        this.cluster = Cluster.builder()
-//                .addContactPointsWithPorts(session.getMetadata().getNodes().values().stream()
-//                        .map(Node::getBroadcastAddress)
-//                        .filter(Optional::isPresent)
-//                        .map(Optional::get)
-//                        .toList())
-//                .build();
-        this.cqlSession = cqlSession;
-        this.session = session;
+  private final CassandraProperties cassandraProperties;
+  private final CqlSession cqlSession;
+
+  @Autowired
+  CustomCassandraHealthCheck(
+    final CassandraProperties cassandraProperties
+  ) {
+    this.cassandraProperties = cassandraProperties;
+
+    // We create the CqlSession instance here.
+    // The other option is to have the ApplicationContext provide us one, but that winds
+    // up being the primary (admin?) session. By creating our own, we do not use that
+    // which is used by the application, keeping the health check session separate from
+    // all other application-related operations.
+    this.cqlSession = createCqlSession();
+  }
+
+  private CqlSession createCqlSession() {
+    final List<InetSocketAddress> contactPoints = cassandraProperties.getContactPoints().stream()
+      .map(hostname -> new InetSocketAddress(hostname, cassandraProperties.getPort()))
+      .toList();
+
+    final CqlSessionBuilder cqlSessionBuilder = CqlSession.builder()
+      .addContactPoints(contactPoints)
+      .withLocalDatacenter(cassandraProperties.getLocalDatacenter())
+      .withKeyspace(cassandraProperties.getKeyspaceName());
+    if (StringUtils.isNotBlank(cassandraProperties.getUsername())) {
+      cqlSessionBuilder.withAuthCredentials(
+        StringUtils.defaultString(cassandraProperties.getUsername()),
+        StringUtils.defaultString(cassandraProperties.getPassword())
+      );
     }
+
+    return cqlSessionBuilder.build();
+  }
+
+  @Override
+  public Health health() {
+    final DriverContext context = cqlSession.getContext();
+    final Metadata metadata = cqlSession.getMetadata();
+
+    final Health.Builder builder = new Health.Builder()
+      .withDetail("clusterName", metadata.getClusterName().orElse(""))
+      .withDetail("driverExecutionProfiles",
+        context.getConfig().getProfiles().keySet().stream().toList())
+      .withDetail("hosts", getHosts(metadata))
+      .withDetail("keySpaces", getKeySpaces(metadata))
+      .withDetail("loadBalancingPolicies", getLoadBalancingPolicies(context))
+      .withDetail("localDc", getConfiguredLogicalDataCenter(metadata));
+
+    final NodesBiConsumer consumer = new NodesBiConsumer(new HashMap<>());
+    metadata.getNodes().forEach(consumer);
+    builder.withDetail("nodes", consumer.nodesMap());
+
+    builder
+      .withDetail("reconnectionPolicy", context.getReconnectionPolicy().getClass().getName())
+      .withDetail("retryPolicies", getRetryPolicies(context))
+      .withDetail("sessionName", context.getSessionName());
+
+    try {
+      cqlSession.execute("SELECT cluster_name FROM system.local;").forEach(row -> {
+        LOGGER.debug("cluster_name: {}", row.getString(0));
+      });
+      builder.up();
+    } catch (final Exception e) {
+      builder.down(e);
+    }
+
+    return builder.build();
+  }
+
+  private static String getConfiguredLogicalDataCenter(@Nonnull final Metadata metadata) {
+    return metadata.getNodes().values().stream()
+      .findFirst()
+      .map(Node::getDatacenter)
+      .orElse("");
+  }
+
+  private static List<String> getHosts(@Nonnull final Metadata metadata) {
+    return metadata.getNodes().values().stream()
+      .filter(node -> node.getListenAddress().isPresent())
+      .map(node -> node.getListenAddress().get().toString())
+      .toList();
+  }
+
+  private static List<String> getKeySpaces(@Nonnull final Metadata metadata) {
+    return metadata.getKeyspaces().keySet().stream()
+      .map(identifier -> identifier.asCql(true))
+      .toList();
+  }
+
+  private static List<String> getLoadBalancingPolicies(@Nonnull final DriverContext context) {
+    return context.getLoadBalancingPolicies().keySet().stream().toList();
+  }
+
+  private static List<String> getRetryPolicies(@Nonnull final DriverContext context) {
+    return context.getRetryPolicies().keySet().stream().toList();
+  }
+
+  record NodesBiConsumer(Map<UUID, Map<String, Object>> nodesMap) implements BiConsumer<UUID, Node> {
+    @Override
+    public void accept(@Nonnull final UUID uuid, @Nonnull final Node node) {
+      final NodeDetailsConsumer consumer = new NodeDetailsConsumer(new TreeMap<>());
+      consumer.accept(node);
+      nodesMap.put(uuid, consumer.details());
+    }
+  }
+
+  record NodeDetailsConsumer(Map<String, Object> details) implements Consumer<Node> {
 
     private static final InetSocketAddress ADDRESS_ANY = InetSocketAddress.createUnresolved("0.0.0.0", 0);
 
     @Override
-    public Health health() {
-        final Health.Builder builder = new Health.Builder()
-                .withDetail("clusterName", session.getMetadata().getClusterName().orElse(""))
-                .withDetail("hosts", getHosts())
-                .withDetail("loadBalancingPolicies",
-                        session.getContext().getLoadBalancingPolicies().keySet().stream().toList())
-                .withDetail("localDc", getConfiguredLogicalDataCenter());
-
-        final var keyspaces = new ArrayList<>(session.getMetadata().getKeyspaces().keySet().stream()
-                .map(cqlIdentifier -> cqlIdentifier.asCql(true))
-                .toList());
-//        session.getMetadata().getKeyspaces().forEach((cqlIdentifier, keyspaceMetadata) -> {
-//            keyspaces.add(Map.of(
-//                    "cqlIdentifier", cqlIdentifier.asCql(true),
-//                    "keyspaceMetadata", keyspaceMetadata.describeWithChildren(true)
-//            ));
-//        });
-        builder.withDetail("keyspaces", keyspaces);
-
-        final var nodes = new HashMap<>();
-        session.getMetadata().getNodes().forEach((uuid, node) -> {
-            final var nodeDetails = new HashMap<>(Map.of(
-                    "broadcastAddress", node.getBroadcastAddress().orElse(ADDRESS_ANY),
-                    "broadcastRpcAddress", node.getBroadcastRpcAddress().orElse(ADDRESS_ANY),
-                    "cassandraVersion", Objects.requireNonNull(node.getCassandraVersion()),
-                    "datacenter", Objects.requireNonNull(node.getDatacenter()),
-                    "distance", node.getDistance(),
-                    "endPoint", Objects.requireNonNull(node.getEndPoint()),
-                    "extras", node.getExtras(),
-                    "hostId", Objects.requireNonNull(node.getHostId()),
-                    "listenAddress", node.getListenAddress().orElse(ADDRESS_ANY),
-                    "openConnections", node.getOpenConnections()
-            ));
-            nodeDetails.putAll(Map.of(
-                    "rack", Objects.requireNonNull(node.getRack()),
-                    "schemaVersion", Objects.requireNonNull(node.getSchemaVersion()),
-                    "state", node.getState(),
-                    "upSinceMillis", node.getUpSinceMillis() == -1
-                            ? ""
-                            : Instant.ofEpochMilli(node.getUpSinceMillis()).atZone(ZoneId.systemDefault())
-            ));
-            nodes.put(uuid, nodeDetails);
-        });
-        builder.withDetail("nodes", nodes);
-
-        try {
-            cqlSession.execute("SELECT cluster_name FROM system.local;").forEach(row -> {
-                System.out.printf("cluster_name: %s%n", row.getString(0));
-            });
-            builder.up();
-        } catch (final Exception e) {
-            builder.down(e);
-        }
-
-//        try (com.datastax.driver.core.Session s = cluster.connect()) {
-//            s.execute("SELECT cluster_name FROM system.local;");
-//            builder.up();
-//        } catch (final Exception e) {
-//            builder.down(e);
-//        }
-
-//        try (final CqlSession cqlSession = new CqlSessionBuilder()
-//                .addContactPoints(session.getMetadata().getNodes().values().stream()
-//                        .map(Node::getListenAddress)
-//                        .filter(Optional::isPresent)
-//                        .map(Optional::get)
-//                        .toList())
-//                .withLocalDatacenter(session.getMetadata().getNodes().values().stream()
-//                        .map(Node::getDatacenter)
-//                        .toList()
-//                        .get(0))
-//                .build()) {
-//            cqlSession.execute("SELECT cluster_name FROM system.local;").all();
-//            builder.up();
-//        } catch (final Exception exception) {
-//            builder.down(exception);
-//        }
-
-        return builder.build();
+    public void accept(@Nonnull final Node node) {
+      details.clear();
+      details.put("broadcastAddress", node.getBroadcastAddress().orElse(ADDRESS_ANY));
+      details.put("broadcastRpcAddress", node.getBroadcastRpcAddress().orElse(ADDRESS_ANY));
+      details.put("cassandraVersion", node.getCassandraVersion());
+      details.put("datacenter", node.getDatacenter());
+      details.put("distance", node.getDistance());
+      details.put("endPoint", node.getEndPoint());
+      details.put("extras", node.getExtras());
+      details.put("hostId", node.getHostId());
+      details.put("listenAddress", node.getListenAddress().orElse(ADDRESS_ANY));
+      details.put("openConnections", node.getOpenConnections());
+      details.put("rack", node.getRack());
+      details.put("schemaVersion", node.getSchemaVersion());
+      details.put("state", node.getState());
+      details.put("upSinceMillis", convertUpSinceMillis(node.getUpSinceMillis()));
     }
 
-    private String getConfiguredLogicalDataCenter() {
-        return session.getMetadata().getNodes().values().stream()
-                .findFirst()
-                .map(Node::getDatacenter)
-                .orElse("");
+    private static String convertUpSinceMillis(final long millis) {
+      if (millis == -1) {
+        return "";
+      }
+      return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toString();
     }
 
-    private List<String> getHosts() {
-        return session.getMetadata().getNodes().values().stream()
-                .filter(node -> node.getListenAddress().isPresent())
-                .map(node -> node.getListenAddress().get().toString())
-                .toList();
-    }
+  }
 
 }

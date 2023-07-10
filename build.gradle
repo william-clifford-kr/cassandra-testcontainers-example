@@ -1,95 +1,100 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 buildscript {
-    ext {
-        springBootVersion = project.findProperty("spring.boot.version") ?: "2.7.13"
-    }
-    logger.lifecycle("Spring Boot version: ${springBootVersion}")
+  ext {
+    springBootVersion = project.findProperty("spring.boot.version") ?: "2.7.13"
+  }
+  logger.lifecycle("Spring Boot version: ${springBootVersion}")
 }
 
 plugins {
-    id "java"
-    id "org.springframework.boot" version "${springBootVersion}"
-    id "io.spring.dependency-management" version "1.1.0"
-    id "jvm-test-suite"
+  id "java"
+  id "org.springframework.boot" version "${springBootVersion}"
+  id "io.spring.dependency-management" version "1.1.0"
+  id "jvm-test-suite"
 }
 
 ext {
-    lombokVersion = '1.18.28'
-    testcontainersVersion = '1.18.3'
+  lombokVersion = '1.18.28'
+  testcontainersVersion = '1.18.3'
 }
 
 repositories {
-    mavenCentral()
+  mavenCentral()
 }
 
 configurations {
-    compileOnly {
-        extendsFrom annotationProcessor
-    }
+  compileOnly {
+    extendsFrom annotationProcessor
+  }
 }
 
 dependencies {
-    constraints {
-        implementation("com.datastax.cassandra:cassandra-driver-core:3.11.2") {
-            because "org.testcontainers:cassandra:1.18.3 has cassandra-driver-core:3.10.0 as transient dep"
-        }
+  constraints {
+    implementation("com.datastax.cassandra:cassandra-driver-core:3.11.2") {
+      because "org.testcontainers:cassandra:1.18.3 has cassandra-driver-core:3.10.0 as transient dep"
+    }
 
-        implementation("com.google.guava:guava:32.1.1-jre") {
-            because """com.google.guava:guava:19.0 is vulnerable:
+    implementation("com.google.guava:guava:32.1.1-jre") {
+      because """com.google.guava:guava:19.0 is vulnerable:
 CVE-2018-10237 5.9 Allocation of Resources Without Limits or Throttling vulnerability pending CVSS allocation
 CVE-2020-8908 3.3 Incorrect Permission Assignment for Critical Resource vulnerability pending CVSS allocation
 """
-        }
     }
+  }
 
-    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
-    annotationProcessor("org.projectlombok:lombok:${lombokVersion}")
+  annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+  annotationProcessor("org.projectlombok:lombok:${lombokVersion}")
 
-    compileOnly("org.projectlombok:lombok:${lombokVersion}")
+  compileOnly("org.projectlombok:lombok:${lombokVersion}")
 
-    developmentOnly("org.springframework.boot:spring-boot-devtools")
+  developmentOnly("org.springframework.boot:spring-boot-devtools")
 
-    implementation platform("org.testcontainers:testcontainers-bom:${testcontainersVersion}")
+  implementation platform("org.testcontainers:testcontainers-bom:${testcontainersVersion}")
 
-    implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("org.springframework.boot:spring-boot-starter-data-cassandra")
-    implementation("org.springframework.data:spring-data-cassandra")
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    runtimeOnly("org.springframework.boot:spring-boot-properties-migrator")
+  implementation("org.springframework.boot:spring-boot-starter-actuator")
+  implementation("org.springframework.boot:spring-boot-starter-data-cassandra")
+  implementation("org.springframework.data:spring-data-cassandra")
+  implementation("org.springframework.boot:spring-boot-starter-web")
 
-    runtimeOnly("com.codahale.metrics:metrics-core:3.0.2")
+  implementation("org.apache.commons:commons-collections4:4.4")
+  implementation("org.apache.commons:commons-lang3:3.12.0")
+  implementation("org.apache.commons:commons-text:1.10.0")
 
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.3")
-    testImplementation("org.testcontainers:testcontainers")
-    testImplementation("org.testcontainers:cassandra")
-    testImplementation("org.testcontainers:junit-jupiter")
+  runtimeOnly("org.springframework.boot:spring-boot-properties-migrator")
+
+  runtimeOnly("com.codahale.metrics:metrics-core:3.0.2")
+
+  testImplementation("org.springframework.boot:spring-boot-starter-test")
+  testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.3")
+  testImplementation("org.testcontainers:testcontainers")
+  testImplementation("org.testcontainers:cassandra")
+  testImplementation("org.testcontainers:junit-jupiter")
 }
 
 test {
-    useJUnitPlatform()
+  useJUnitPlatform()
 
-    testLogging {
-        debug {
-            events "FAILED", "PASSED", "SKIPPED", "STARTED", "STANDARD_ERROR", "STANDARD_OUT"
-            exceptionFormat TestExceptionFormat.FULL
-            showCauses true
-            showExceptions true
-            showStackTraces true
-            showStandardStreams true
-        }
-
-        events "FAILED", "PASSED", "SKIPPED", "STANDARD_ERROR"
-        exceptionFormat TestExceptionFormat.SHORT
-        showExceptions true
+  testLogging {
+    debug {
+      events "FAILED", "PASSED", "SKIPPED", "STARTED", "STANDARD_ERROR", "STANDARD_OUT"
+      exceptionFormat TestExceptionFormat.FULL
+      showCauses true
+      showExceptions true
+      showStackTraces true
+      showStandardStreams true
     }
 
-    afterSuite { TestDescriptor desc, TestResult result ->
-        if (desc.parent == null) {
-            System.out.println("""${desc.displayName} ${result.resultType}
+    events "FAILED", "PASSED", "SKIPPED", "STANDARD_ERROR"
+    exceptionFormat TestExceptionFormat.SHORT
+    showExceptions true
+  }
+
+  afterSuite { TestDescriptor desc, TestResult result ->
+    if (desc.parent == null) {
+      System.out.println("""${desc.displayName} ${result.resultType}
     Success: ${result.successfulTestCount}, Failed: ${result.failedTestCount}, Skipped: ${result.skippedTestCount}
 """)
-        }
     }
+  }
 }
