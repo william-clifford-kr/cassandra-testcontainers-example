@@ -5,6 +5,7 @@ spring:
     keyspace-name: ${CASSANDRA_KEYSPACE_NAME}
     local-datacenter: datacenter1
     port: ${CASSANDRA_PORT}
+    # schema-action: create_if_not_exists
   # For Spring Boot 2.7.x with spring-data-cassandra:3.4.13 , use the following block.
   data:
     cassandra:
@@ -12,6 +13,7 @@ spring:
       keyspace-name: ${CASSANDRA_KEYSPACE_NAME}
       local-datacenter: datacenter1
       port: ${CASSANDRA_PORT}
+      # schema-action: create_if_not_exists
   jackson:
     serialization:
       fail-on-empty-beans: false
